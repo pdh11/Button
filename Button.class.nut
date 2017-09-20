@@ -11,14 +11,15 @@ class Button {
     static NORMALLY_LOW = 0;
 
     _pin = null;
-    _pull = null;
     _polarity = null;
+    _state = null;
+    _transition = null;
+    _timer = null;
     _pressCallback = null;
     _releaseCallback = null;
 
     constructor(pin, pull, polarity = null, pressCallback = null, releaseCallback = null) {
         _pin = pin;
-        _pull = pull;
 
         if (polarity == null) {
             if (pull == DIGITAL_IN_PULLDOWN || pull == DIGITAL_IN_WAKEUP) polarity = NORMALLY_LOW;
@@ -29,7 +30,7 @@ class Button {
         _pressCallback = pressCallback;
         _releaseCallback = releaseCallback;
 
-        _pin.configure(_pull, _debounce.bindenv(this));
+        _pin.configure(pull, _checkState.bindenv(this));
     }
 
     function onPress(cb=null) {
@@ -43,28 +44,36 @@ class Button {
     }
 
     /******************** PRIVATE FUNCTIONS (DO NOT CALL) ********************/
-    function _debounce() {
-        // Make sure callback isn’t triggered during debounce period
-        _pin.configure(_pull);
-
-        imp.wakeup(0.010, _getState.bindenv(this));  // Bounce times are usually limited to 10ms
+    function _inDebouncePeriod() {
+        if (_transition == null) {
+            return false;
+        }
+        return (hardware.millis() - _transition) < 10;
     }
-
-    function _getState() {
-        // Re-enabled callback after button action - it's important that this happens first in case we have "long running" callbacks!
-        _pin.configure(_pull, _debounce.bindenv(this));
-
-        if( _polarity == _pin.read() )
-        {
-            if(_releaseCallback != null)
-            {
+    
+    function _checkState() {
+        if (_inDebouncePeriod()) {
+            if (_timer == null) {
+                _timer = imp.wakeup(0.010, _checkState.bindenv(this));
+            }
+            return;
+        }
+        if (_timer != null) {
+            imp.cancelwakeup(_timer);
+        }
+        _timer = null;
+        local state = _pin.read();
+        if (state == _state) {
+            return;
+        }
+        _state = state;
+        _transition = hardware.millis();
+        if (state == _polarity) {
+            if (_releaseCallback != null) {
                 _releaseCallback();
             }
-        }
-        else
-        {
-            if(_pressCallback != null)
-            {
+        } else {
+            if (_pressCallback != null) {
                 _pressCallback();
             }
         }
